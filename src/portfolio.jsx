@@ -262,7 +262,7 @@ const SKILLS = {
 const SOCIAL = {
   github: "https://github.com/DimitrisBelias/",
   linkedin: "https://www.linkedin.com/in/beliasdimitris",
-  email: "mailto:dimitris.outlook.com",
+  email: "mailto:dimitris.belias@outlook.com",
 };
 
 /* ─── Animated Section Hook ─── */
