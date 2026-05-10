@@ -1,120 +1,83 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { motion } from "framer-motion";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Points, PointMaterial } from "@react-three/drei";
 
-/* ─── Animated Star Field ─── */
-function StarField() {
-  const canvasRef = useRef(null);
+const fadeUp = {
+  hidden: { opacity: 0, y: 40 },
+  visible: { opacity: 1, y: 0 },
+};
+
+const staggerContainer = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.12 } },
+};
+
+/* ─── R3F Particle Cloud ─── */
+function ParticleField() {
+  const ref = useRef();
   const mouseRef = useRef({ x: 0, y: 0 });
-  const starsRef = useRef([]);
-  const animRef = useRef(null);
+  const baseRotY = useRef(0);
 
-  const initStars = useCallback((w, h) => {
-    const count = Math.floor((w * h) / 4000);
-    starsRef.current = Array.from({ length: count }, () => ({
-      x: Math.random() * w,
-      y: Math.random() * h,
-      z: Math.random() * 3 + 0.5,
-      baseOpacity: Math.random() * 0.6 + 0.15,
-      phase: Math.random() * Math.PI * 2,
-      twinkleSpeed: Math.random() * 0.02 + 0.005,
-    }));
+  const positions = useMemo(() => {
+    const count = 2500;
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      // Distribute points in a sphere with slight depth spread
+      const r = Math.random() * 5 + 1;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+      pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      pos[i * 3 + 2] = r * Math.cos(phi);
+    }
+    return pos;
   }, []);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    let w = (canvas.width = window.innerWidth);
-    let h = (canvas.height = window.innerHeight);
-    initStars(w, h);
-
-    const handleResize = () => {
-      w = canvas.width = window.innerWidth;
-      h = canvas.height = window.innerHeight;
-      initStars(w, h);
+    const onMouseMove = (e) => {
+      mouseRef.current = {
+        x:  (e.clientX / window.innerWidth  - 0.5) * 2,
+        y: -(e.clientY / window.innerHeight - 0.5) * 2,
+      };
     };
+    window.addEventListener("mousemove", onMouseMove);
+    return () => window.removeEventListener("mousemove", onMouseMove);
+  }, []);
 
-    const handleMouse = (e) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY };
-    };
-
-    window.addEventListener("resize", handleResize);
-    window.addEventListener("mousemove", handleMouse);
-
-    let t = 0;
-    const draw = () => {
-      ctx.clearRect(0, 0, w, h);
-      t++;
-
-      // Subtle radial glow near mouse
-      const mx = mouseRef.current.x;
-      const my = mouseRef.current.y;
-      const grad = ctx.createRadialGradient(mx, my, 0, mx, my, 220);
-      grad.addColorStop(0, "rgba(245, 158, 11, 0.015)");
-      grad.addColorStop(1, "rgba(245, 158, 11, 0)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-
-      for (const star of starsRef.current) {
-        // Parallax drift based on scroll
-        const scrollY = window.scrollY;
-        const yOffset = (scrollY * star.z * 0.04) % h;
-        const drawY = (star.y + yOffset) % h;
-
-        // Twinkle
-        const twinkle = Math.sin(t * star.twinkleSpeed + star.phase) * 0.3 + 0.7;
-        const opacity = star.baseOpacity * twinkle;
-
-        // Proximity glow
-        const dx = mx - star.x;
-        const dy = my - drawY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const proximity = dist < 180 ? (1 - dist / 180) * 0.5 : 0;
-
-        const radius = star.z * 0.8;
-        const finalOpacity = Math.min(opacity + proximity, 1);
-
-        ctx.beginPath();
-        ctx.arc(star.x, drawY, radius, 0, Math.PI * 2);
-        ctx.fillStyle =
-          proximity > 0.05
-            ? `rgba(245, 180, 60, ${finalOpacity})`
-            : `rgba(220, 220, 230, ${finalOpacity})`;
-        ctx.fill();
-      }
-
-      // Occasional shooting star
-      if (Math.random() < 0.002) {
-        const sx = Math.random() * w;
-        const sy = Math.random() * h * 0.5;
-        const len = Math.random() * 80 + 40;
-        const sGrad = ctx.createLinearGradient(sx, sy, sx + len, sy + len * 0.4);
-        sGrad.addColorStop(0, "rgba(245, 180, 60, 0.6)");
-        sGrad.addColorStop(1, "rgba(245, 180, 60, 0)");
-        ctx.strokeStyle = sGrad;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(sx, sy);
-        ctx.lineTo(sx + len, sy + len * 0.4);
-        ctx.stroke();
-      }
-
-      animRef.current = requestAnimationFrame(draw);
-    };
-
-    draw();
-    return () => {
-      cancelAnimationFrame(animRef.current);
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("mousemove", handleMouse);
-    };
-  }, [initStars]);
+  useFrame((_, delta) => {
+    if (!ref.current) return;
+    baseRotY.current += delta * 0.025; // slow auto-rotation
+    const targetX = mouseRef.current.y * -0.15;
+    const targetY = baseRotY.current + mouseRef.current.x * 0.2;
+    ref.current.rotation.x += (targetX - ref.current.rotation.x) * 0.04;
+    ref.current.rotation.y += (targetY - ref.current.rotation.y) * 0.04;
+  });
 
   return (
-    <canvas
-      ref={canvasRef}
+    <Points ref={ref} positions={positions} stride={3} frustumCulled={false}>
+      <PointMaterial
+        transparent
+        color="#f59e0b"
+        size={0.018}
+        sizeAttenuation
+        depthWrite={false}
+        opacity={0.55}
+      />
+    </Points>
+  );
+}
+
+function StarField() {
+  return (
+    <div
       className="fixed inset-0 z-0 pointer-events-none"
       style={{ background: "radial-gradient(ellipse at 50% 0%, #0c0c14 0%, #050507 70%)" }}
-    />
+    >
+      <Canvas camera={{ position: [0, 0, 6], fov: 60 }}>
+        <ParticleField />
+      </Canvas>
+    </div>
   );
 }
 
@@ -265,23 +228,6 @@ const SOCIAL = {
   email: "mailto:dimitris.belias@outlook.com",
 };
 
-/* ─── Animated Section Hook ─── */
-function useReveal() {
-  const ref = useRef(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      ([e]) => { if (e.isIntersecting) { setVisible(true); obs.unobserve(el); } },
-      { threshold: 0.15 }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-  return [ref, visible];
-}
-
 /* ─── Components ─── */
 
 function Navbar({ active }) {
@@ -321,44 +267,46 @@ function Navbar({ active }) {
 }
 
 function Hero() {
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setLoaded(true), 100); return () => clearTimeout(t); }, []);
-
   return (
     <section id="hero" className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Glow */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl" />
 
-      <div className="relative z-10 text-center px-6">
-        <p
-          className={`font-mono text-xs tracking-[0.35em] uppercase text-amber-400/80 mb-6 transition-all duration-700 ${
-            loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
+      <motion.div
+        className="relative z-10 text-center px-6"
+        variants={staggerContainer}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.p
+          variants={fadeUp}
+          transition={{ duration: 0.7 }}
+          className="font-mono text-xs tracking-[0.35em] uppercase text-amber-400/80 mb-6"
         >
           Electrical &amp; Computer Engineer
-        </p>
-        <h1
-          className={`text-5xl sm:text-7xl md:text-8xl font-extralight tracking-tight text-neutral-100 mb-4 transition-all duration-700 delay-150 ${
-            loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
-          }`}
+        </motion.p>
+        <motion.h1
+          variants={fadeUp}
+          transition={{ duration: 0.7 }}
+          className="text-5xl sm:text-7xl md:text-8xl font-extralight tracking-tight text-neutral-100 mb-4"
           style={{ fontFamily: "'Syne', sans-serif" }}
         >
           Dimitris<span className="text-amber-400 font-light">.</span>
           <br />
           Belias
-        </h1>
-        <p
-          className={`text-neutral-500 text-sm sm:text-base max-w-md mx-auto mt-6 leading-relaxed transition-all duration-700 delay-300 ${
-            loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
+        </motion.h1>
+        <motion.p
+          variants={fadeUp}
+          transition={{ duration: 0.7 }}
+          className="text-neutral-500 text-sm sm:text-base max-w-md mx-auto mt-6 leading-relaxed"
         >
           Backend-focused developer with a passion for systems programming,
           distributed architectures, and clean software design.
-        </p>
-        <div
-          className={`mt-10 transition-all duration-700 delay-500 ${
-            loaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
+        </motion.p>
+        <motion.div
+          variants={fadeUp}
+          transition={{ duration: 0.7 }}
+          className="mt-10"
         >
           <a
             href="#projects"
@@ -366,22 +314,33 @@ function Hero() {
           >
             View Work
           </a>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
 
       {/* Scroll indicator */}
-      <div className={`absolute bottom-8 left-1/2 -translate-x-1/2 transition-all duration-700 delay-700 ${loaded ? "opacity-100" : "opacity-0"}`}>
+      <motion.div
+        className="absolute bottom-8 left-1/2 -translate-x-1/2"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 1, duration: 0.7 }}
+      >
         <div className="w-px h-12 bg-gradient-to-b from-transparent via-neutral-600 to-transparent animate-pulse" />
-      </div>
+      </motion.div>
     </section>
   );
 }
 
 function About() {
-  const [ref, visible] = useReveal();
   return (
     <section id="about" className="py-32 px-6">
-      <div ref={ref} className={`max-w-3xl mx-auto transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}>
+      <motion.div
+        className="max-w-3xl mx-auto"
+        variants={fadeUp}
+        initial="hidden"
+        whileInView="visible"
+        viewport={{ once: true, margin: "-100px" }}
+        transition={{ duration: 0.7 }}
+      >
         <p className="font-mono text-xs tracking-[0.3em] uppercase text-amber-400/70 mb-8">About</p>
         <h2 className="text-3xl sm:text-4xl font-extralight text-neutral-200 mb-8 leading-snug" style={{ fontFamily: "'Syne', sans-serif" }}>
           Building robust systems<span className="text-amber-400">.</span>
@@ -399,28 +358,33 @@ function About() {
           </p>
 
         </div>
-      </div>
+      </motion.div>
     </section>
   );
 }
 
 function ProjectCard({ project, index }) {
-  const [ref, visible] = useReveal();
   const [hovered, setHovered] = useState(false);
 
   return (
-    <div
-      ref={ref}
+    <motion.div
+      variants={fadeUp}
+      transition={{ duration: 0.6 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className={`group relative border border-neutral-800/60 p-8 transition-all duration-700 cursor-pointer ${
-        visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
-      }`}
-      style={{ transitionDelay: `${index * 120}ms` }}
+      className="group relative border border-neutral-800/60 p-8 cursor-pointer"
     >
       {/* Corner accent */}
-      <div className={`absolute top-0 left-0 w-8 h-px bg-amber-400 transition-all duration-500 ${hovered ? "w-16" : "w-8"}`} />
-      <div className={`absolute top-0 left-0 h-8 w-px bg-amber-400 transition-all duration-500 ${hovered ? "h-16" : "h-8"}`} />
+      <motion.div
+        className="absolute top-0 left-0 h-px bg-amber-400"
+        animate={{ width: hovered ? 64 : 32 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      />
+      <motion.div
+        className="absolute top-0 left-0 w-px bg-amber-400"
+        animate={{ height: hovered ? 64 : 32 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      />
 
       <p className="font-mono text-xs text-neutral-600 mb-4">0{index + 1}</p>
       <h3
@@ -439,72 +403,92 @@ function ProjectCard({ project, index }) {
       </div>
 
       {/* Arrow */}
-      <div className={`absolute bottom-8 right-8 text-amber-400 transition-all duration-300 ${hovered ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-2"}`}>
+      <motion.div
+        className="absolute bottom-8 right-8 text-amber-400"
+        animate={{ opacity: hovered ? 1 : 0, x: hovered ? 0 : -8 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M5 12h14M12 5l7 7-7 7" />
         </svg>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
 function Projects() {
-  const [ref, visible] = useReveal();
   return (
     <section id="projects" className="py-32 px-6">
       <div className="max-w-5xl mx-auto">
-        <div ref={ref} className={`mb-16 transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}>
+        <motion.div
+          className="mb-16"
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.7 }}
+        >
           <p className="font-mono text-xs tracking-[0.3em] uppercase text-amber-400/70 mb-4">Projects</p>
           <h2 className="text-3xl sm:text-4xl font-extralight text-neutral-200" style={{ fontFamily: "'Syne', sans-serif" }}>
             Selected work<span className="text-amber-400">.</span>
           </h2>
-        </div>
-        <div className="grid md:grid-cols-2 gap-6">
+        </motion.div>
+        <motion.div
+          className="grid md:grid-cols-2 gap-6"
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+        >
           {PROJECTS.map((p, i) => (
             <ProjectCard key={p.title} project={p} index={i} />
           ))}
-        </div>
+        </motion.div>
       </div>
     </section>
   );
 }
 
 function Skills() {
-  const [ref, visible] = useReveal();
   return (
     <section id="skills" className="py-32 px-6">
       <div className="max-w-5xl mx-auto">
-        <div ref={ref} className={`mb-16 transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}>
+        <motion.div
+          className="mb-16"
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.7 }}
+        >
           <p className="font-mono text-xs tracking-[0.3em] uppercase text-amber-400/70 mb-4">Skills</p>
           <h2 className="text-3xl sm:text-4xl font-extralight text-neutral-200" style={{ fontFamily: "'Syne', sans-serif" }}>
             Tech stack<span className="text-amber-400">.</span>
           </h2>
-        </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10">
-          {Object.entries(SKILLS).map(([category, items], ci) => {
-            const [cRef, cVis] = useReveal();
-            return (
-              <div
-                key={category}
-                ref={cRef}
-                className={`transition-all duration-700 ${cVis ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}
-                style={{ transitionDelay: `${ci * 100}ms` }}
-              >
-                <h3 className="font-mono text-xs tracking-widest uppercase text-neutral-500 mb-5 pb-2 border-b border-neutral-800/50">
-                  {category}
-                </h3>
-                <ul className="space-y-2.5">
-                  {items.map((s) => (
-                    <li key={s} className="text-sm text-neutral-400 flex items-center gap-2.5 group cursor-default">
-                      <span className="w-1 h-1 bg-amber-400/50 group-hover:bg-amber-400 transition-colors duration-300" />
-                      <span className="group-hover:text-neutral-200 transition-colors duration-300">{s}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
+        </motion.div>
+        <motion.div
+          className="grid sm:grid-cols-2 lg:grid-cols-4 gap-10"
+          variants={staggerContainer}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+        >
+          {Object.entries(SKILLS).map(([category, items]) => (
+            <motion.div key={category} variants={fadeUp} transition={{ duration: 0.6 }}>
+              <h3 className="font-mono text-xs tracking-widest uppercase text-neutral-500 mb-5 pb-2 border-b border-neutral-800/50">
+                {category}
+              </h3>
+              <ul className="space-y-2.5">
+                {items.map((s) => (
+                  <li key={s} className="text-sm text-neutral-400 flex items-center gap-2.5 group cursor-default">
+                    <span className="w-1 h-1 bg-amber-400/50 group-hover:bg-amber-400 transition-colors duration-300" />
+                    <span className="group-hover:text-neutral-200 transition-colors duration-300">{s}</span>
+                  </li>
+                ))}
+              </ul>
+            </motion.div>
+          ))}
+        </motion.div>
       </div>
     </section>
   );
@@ -544,7 +528,6 @@ const HACK_LEVELS = [
 ];
 
 function TerminalHacker() {
-  const [ref, visible] = useReveal();
   const [started, setStarted] = useState(false);
   const [level, setLevel] = useState(0);
   const [lines, setLines] = useState([]);
@@ -686,7 +669,13 @@ function TerminalHacker() {
   return (
     <section id="terminal" className="py-32 px-6">
       <div className="max-w-3xl mx-auto">
-        <div ref={ref} className={`transition-all duration-700 ${visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}>
+        <motion.div
+          variants={fadeUp}
+          initial="hidden"
+          whileInView="visible"
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.7 }}
+        >
           <p className="font-mono text-xs tracking-[0.3em] uppercase text-amber-400/70 mb-4">Interactive</p>
           <h2 className="text-3xl sm:text-4xl font-extralight text-neutral-200 mb-8" style={{ fontFamily: "'Syne', sans-serif" }}>
             Hack the system<span className="text-amber-400">.</span>
@@ -763,7 +752,7 @@ function TerminalHacker() {
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
     </section>
   );
